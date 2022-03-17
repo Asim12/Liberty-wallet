@@ -242,6 +242,7 @@ var USDTABI = [
 ];
 
 const Web3   =  require('web3');
+const { resolve } = require("path");
 // const Web3Client = new Web3('https://speedy-nodes-nyc.moralis.io/1a2b3c4d5e6f1a2b3c4d5e6f/bsc/mainnet');
 const Web3Client = new Web3('https://speedy-nodes-nyc.moralis.io/defd019df2c0685181b50e9a/bsc/testnet')
 
@@ -367,7 +368,6 @@ module.exports = {
         })
     },
 
-
     generateEmailConfirmationCodeSendIntoEmail: (email)=> {
         return new Promise((resolve, reject) => {
             conn.then(async(db) => {
@@ -413,7 +413,6 @@ module.exports = {
         })
     },
 
-
     codeVarifyEmail: (email, code)=> {
         return new Promise(resolve => {
             conn.then((db) => {
@@ -439,9 +438,12 @@ module.exports = {
         });
     },
 
-
     createTrustWallet : (walletType, mnemonic_input) => {
         return new Promise(async(resolve) => {
+            
+            // const web3 = new Web3('https://bsc-dataseed1.binance.org:443');        
+            // const account = web3.eth.accounts.create();
+            // console.log(account);
             let mnemonic ; 
             if(walletType == 'create_new'){
 
@@ -472,7 +474,6 @@ module.exports = {
         })
     },
 
-
     userTokenBalanceByContract : () => {
         return new Promise ( async(resolve) => {
             try {
@@ -491,7 +492,6 @@ module.exports = {
             }
         })
     },
-
 
     getWalletAddressBalance : (walletAddress, contractAddress) => {
         return new Promise(async(resolve) => {
@@ -513,7 +513,6 @@ module.exports = {
         })
     },
 
-
     calculateGassLimit : (senderWalletAddress, nonce, contractAddress, data) => {
         return new Promise(async(resolve) => {
 
@@ -527,7 +526,6 @@ module.exports = {
             resolve(gassFeeEstimate);
         })
     },
-
 
     calculateGassLimitEstimate : (senderWalletAddress, nonce, contractAddress, data) => {
         return new Promise(async(resolve) => {
@@ -614,7 +612,8 @@ module.exports = {
                 const gasPrice = Web3Client.utils.toHex(Web3Client.eth.gasPrice || Web3Client.utils.toHex(2 * 1e9));
                 const value    = Web3Client.utils.toHex(Web3Client.utils.toWei('0', 'wei'));
 
-                // Chain ID of Ropsten Test Net is 97, replace it to 1 for Main Net
+                // Chain ID of Ropsten Test Net is 97, replace it to 56 for Main Net
+                // var chainId = 56;
                 var chainId = 97;
                 var rawTransaction = {
                     "from": walletAddress,
@@ -651,8 +650,9 @@ module.exports = {
                 const gasPrice = Web3Client.utils.toHex(50 * 1e9);
                 const value    = Web3Client.utils.toHex(Web3Client.utils.toWei('0', 'wei'));
 
-                // Chain ID of Ropsten Test Net is 97, replace it to 1 for Main Net
+                // Chain ID of Ropsten Test Net is 97, replace it to 56 for Main Net
                 var chainId = 97;
+                // var chainId = 56 ;
                 var rawTransaction = {
                     "from": walletAddress,
                     "nonce": nonce,
@@ -684,7 +684,7 @@ module.exports = {
         return new Promise (resolve => {
             conn.then(async(db) => {
                 let data = await db.collection('contract_address').findOne({symbol : symbol })
-                console.log('data  ====>>>>>>>> ', data)
+                // console.log('data  ====>>>>>>>> ', data)
                 if(data){
                     resolve(data.contract_address)
                 }else{
@@ -699,7 +699,7 @@ module.exports = {
         return new Promise(async(resolve) => {
             try{
                 let decimals = await contract.methods.decimals().call();
-                let symbols   = await contract.methods.symbol().call();
+                let symbols  = await contract.methods.symbol().call();
                 console.log('decimals', decimals)
                 console.log('symbols', symbols)
                 if(symbols == symbol && decimals.length > 0  ){
@@ -739,10 +739,69 @@ module.exports = {
                     resolve({ estimatedGasFee: estimatePrice,  status: 200 });
                 }
             } catch (error) {
-
-                console.log("🚀 ~ file: ether.controller.js ~ line 486 ~ estimateGasForEthTransaction ~ error", error)
+                
                 resolve({ error: error,  status: 404 });
             }
         })
-    }
+    },
+
+
+    addContractAddress : (symbol, contractAddress) => {
+        return new Promise(resolve => {
+            conn.then(async(db) => {
+                let insertObject = {
+                    contract_address : contractAddress,
+                    created_date     : new Date()
+                }
+                db.collection('contract_address').updateOne({ symbol : symbol}, {$set : insertObject}, {upsert: true})
+                // console.log('done')
+                resolve(true);
+            })
+        })
+    },
+
+
+    updateUserEmail : (email, user_id) => {
+        return new Promise (resolve => {
+            conn.then(async(db) => {
+
+                db.collection('users').updateOne({ _id : new objectId(user_id )}, {'$set' : {email : email}}, async(error, result) => {
+                    if(error){
+
+                        resolve({status : 404, message : "database have some issue!!!"})
+                    }else{
+                        let status = await result;
+                        console.log(status)
+                        if(status.modifiedCount > 0){
+
+                            resolve({ status  : 200, message : "Email is updated!!" })
+                        }else{
+
+                            resolve({ status  : 404, message : "Email is already updated!!" })
+                        }
+                    }
+                })
+            })
+        })
+    },
+
+
+    updateTheRecord : (userId, tokenName, status) => {
+        return new Promise((resolve, reject) => {
+            conn.then(async(db) => {
+                db.collection('user_token').updateOne({userId : userId, tokenName : tokenName}, {'$set' : {status : status, last_updated_date : new Date() }}, {upsert : true})
+                resolve(true)
+            })
+        }) 
+    },
+
+
+    getRecord : (userId) => {
+        return new Promise((resolve, reject) => {
+            conn.then(async(db) => {
+                let data = await db.collection('user_token').find({userId : userId}).toArray()
+                resolve(data)
+            })
+        }) 
+    },
 }
