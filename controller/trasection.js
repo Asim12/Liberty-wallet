@@ -2,32 +2,37 @@ var express  =  require('express');
 var router   =  express.Router();
 const helper =  require('../helper/customHelper')
 const ethers =  require('ethers')
+// require('dotenv').config();
 const upload = require('../middleWare/upload');
+
 const dotenv = require('dotenv')
 dotenv.config();
+
+const Web3       =  require('web3');
+// const Web3Client = new Web3('https://bsc-dataseed.binance.org') // mainnet
+// const Web3Client = new Web3('https://speedy-nodes-nyc.moralis.io/defd019df2c0685181b50e9a/bsc/testnet') // testnet
+//https://rinkeby.infura.io/v3/
+
 const {WETH, ChainId, Route, Router, Fetcher, Trade, TokenAmount, TradeType, Token, Percent } = require('@pancakeswap-libs/sdk'); 
-const Web3   =  require('web3');
-// const Web3Client = new Web3('https://bsc-dataseed.binance.org') //mainnet
-const Web3Client = new Web3('https://speedy-nodes-nyc.moralis.io/defd019df2c0685181b50e9a/bsc/testnet') // testnet
-
 const {JsonRpcProvider} =   require("@ethersproject/providers");
-const provider          =   new JsonRpcProvider('https://bsc-dataseed1.binance.org/');
+const provider          =   new JsonRpcProvider('https://bsc-dataseed1.binance.org/'); // mainnet
 const abi               =   require('../Router2abi.json')
-
 const pancakeSwapRouter2Address  = '0x05fF2B0DB69458A0750badebc4f9e13aDd608C7F'; //mainnet address
 
 router.post('/calculateGassLimit', async (req, res) => {
-    if(req.body.walletAddress && req.body.numTokens && req.body.symbol  && req.body.receiverAddress){
-        let contractAddress = await helper.getContractAddress(req.body.symbol)
+    if(req.body.walletAddress && req.body.numTokens && req.body.symbol  && req.body.receiverAddress && req.body.providerType){
+        let contractAddress = await helper.getContractAddress(req.body.symbol, req.body.providerType)
 
         if(contractAddress){
-            let contract = await helper.getContractAddressInstanse(contractAddress)
-            let response = await helper.countNonceAndData(req.body.walletAddress, req.body.numTokens, req.body.receiverAddress, contract)
+
+            let Web3Client = await helper.getWebClient(req.body.providerType)
+            let contract = await helper.getContractAddressInstanse(contractAddress, Web3Client)
+            let response = await helper.countNonceAndData(req.body.walletAddress, req.body.numTokens, req.body.receiverAddress, contract, Web3Client)
 
             let nonce = response.nonce;
             let data  = response.data;
 
-            let gaseLimit = await helper.calculateGassLimitEstimate(req.body.walletAddress, nonce, contractAddress, data)
+            let gaseLimit = await helper.calculateGassLimitEstimate(req.body.walletAddress, nonce, contractAddress, data, Web3Client)
             let responseGass = {
                 gaseLimit  :   gaseLimit
             }
@@ -48,19 +53,21 @@ router.post('/calculateGassLimit', async (req, res) => {
 
 
 router.post('/sendToken', async(req, res) => {
-    if(req.body.walletAddress && req.body.numTokens && req.body.symbol && req.body.receiverAddress && req.body.senderPrivateKey){
+    if(req.body.walletAddress && req.body.numTokens && req.body.symbol && req.body.receiverAddress && req.body.senderPrivateKey && req.body.providerType){
 
-        let contractAddress = await helper.getContractAddress(req.body.symbol)
+        let contractAddress = await helper.getContractAddress(req.body.symbol, req.body.providerType)
         if(contractAddress){
-            let contract = await helper.getContractAddressInstanse(contractAddress)
-            let response = await helper.countNonceAndData(req.body.walletAddress, req.body.numTokens, req.body.receiverAddress, contract)
+            let Web3Client = await helper.getWebClient(req.body.providerType)
+
+            let contract = await helper.getContractAddressInstanse(contractAddress, Web3Client)
+            let response = await helper.countNonceAndData(req.body.walletAddress, req.body.numTokens, req.body.receiverAddress, contract, Web3Client)
             let nonce = response.nonce;
             let data  = response.data;            
 
-            let gaseLimit = await helper.calculateGassLimit(req.body.walletAddress, nonce, contractAddress, data)
+            let gaseLimit = await helper.calculateGassLimit(req.body.walletAddress, nonce, contractAddress, data, Web3Client)
             
             console.log('gaseLimit', gaseLimit)
-            let balance = await helper.getWalletAddressBalance(req.body.walletAddress, contractAddress)
+            let balance = await helper.getWalletAddressBalance(req.body.walletAddress, contractAddress, Web3Client)
             console.log('balance of wallet are =====', balance)
 
             if( balance <  req.body.numTokens ){
@@ -70,7 +77,7 @@ router.post('/sendToken', async(req, res) => {
                 res.status(404).send(response);
             }else{
         
-                let trasctionData = await helper.transferTokenToOtherWallets(gaseLimit, data, req.body.walletAddress, nonce, req.body.senderPrivateKey, contractAddress)
+                let trasctionData = await helper.transferTokenToOtherWallets(gaseLimit, data, req.body.walletAddress, nonce, req.body.senderPrivateKey, contractAddress, Web3Client)
                 res.status(200).send(trasctionData);
             }
         }else{
@@ -90,10 +97,11 @@ router.post('/sendToken', async(req, res) => {
 
 
 router.post('/getBalance', async(req, res) => {
-    if(req.body.symbol && req.body.walletAddress){
-        let contractAddress = await helper.getContractAddress(req.body.symbol)
+    if(req.body.symbol && req.body.walletAddress && req.body.providerType){
+        let contractAddress = await helper.getContractAddress(req.body.symbol, req.body.providerType)
         if(contractAddress.length > 0){
-            let balance = await helper.getWalletAddressBalance(req.body.walletAddress, contractAddress)
+            let Web3Client = await helper.getWebClient(req.body.providerType)
+            let balance = await helper.getWalletAddressBalance(req.body.walletAddress, contractAddress, Web3Client)
 
             let response = {
                 balance  :   balance
@@ -117,14 +125,15 @@ router.post('/getBalance', async(req, res) => {
  
 
 router.post('/addNewToken', async (req, res) => {
-    if(req.body.symbol && req.body.contractAddress){
+    if(req.body.symbol && req.body.contractAddress  && req.body.providerType){
 
-        let contract    =  await helper.getContractAddressInstanse(req.body.contractAddress)
+        let Web3Client  =  await helper.getWebClient(req.body.providerType)
+        let contract    =  await helper.getContractAddressInstanse(req.body.contractAddress, Web3Client)
         let checkStatus =  await helper.isContractAddressIsValid(req.body.symbol, contract);
 
         console.log('checkStatus', checkStatus)
        
-        helper.addContractAddress(req.body.symbol, req.body.contractAddress);
+        helper.addContractAddress(req.body.symbol, req.body.contractAddress, req.body.providerType);
         res.status(checkStatus.status).send(checkStatus);
     }else{
 
@@ -137,23 +146,27 @@ router.post('/addNewToken', async (req, res) => {
 
 
 router.post('/sendCoin', async(req, res) => {
-    if(req.body.walletAddress && req.body.receiverAddress && req.body.amount && req.body.privateKey){
+    if(req.body.walletAddress && req.body.receiverAddress && req.body.amount && req.body.privateKey && req.body.providerType){
         let walletAddress = req.body.walletAddress
         let privateKey    = req.body.privateKey
         let receiverAddress = req.body.receiverAddress 
         let amount        = req.body.amount 
 
+        let Web3Client = await helper.getWebClient(req.body.providerType)
         const isvalid = Web3Client.utils.isAddress(receiverAddress);
+        console.log(isvalid)
         if(!isvalid){   //Web3Client
             res.status(400).json({ error: `This wallet address is not valid. Kindly confirm the address and try again.` });
         }else{
-            //get ether balance before transaction
-            const ethBalance = await Web3Client.eth.getBalance(walletAddress)
-            // convert amount to ether from wei
-            const ethAmount = Web3Client.utils.fromWei(ethBalance, 'ether')
-            //cgeck sending amount is greater then ether balance
-            if (ethAmount > amount){
-                try{
+            
+            try{
+                //get ether balance before transaction
+                const ethBalance = await Web3Client.eth.getBalance(walletAddress)
+                console.log(ethBalance)
+                // convert amount to ether from wei
+                const ethAmount = Web3Client.utils.fromWei(ethBalance, 'ether')
+                //cgeck sending amount is greater then ether balance
+                if (ethAmount > amount){
                     const count = await Web3Client.eth.getTransactionCount(walletAddress, 'latest')
                     let etherValue = Web3Client.utils.toWei(amount.toString(), 'ether');
 
@@ -169,16 +182,19 @@ router.post('/sendCoin', async(req, res) => {
                     Web3Client.eth.sendSignedTransaction(signedTx.rawTransaction);
                     // deductTransactionFee(walletDetail.user_id, feeInSwet)
                     return res.status(200).json({ transactionHash: signedTx.transactionHash });
-                }catch(error){
+               
+                }else{
+
                     let response = {
-                        message  : error
+                        message  : 'insufficent fund!!!'
                     }
                     res.status(404).send(response);
                 }
-            }else{
 
+            }catch(error){
+                console.log(error)
                 let response = {
-                    message  : 'insufficent fund!!!'
+                    message  : error
                 }
                 res.status(404).send(response);
             }
@@ -194,15 +210,16 @@ router.post('/sendCoin', async(req, res) => {
 
 
 router.post('/calculateGassFeeCoin', async(req, res) => {
-    if(req.body.walletAddress && req.body.receiverAddress  && req.body.amount){
-
+    if(req.body.walletAddress && req.body.receiverAddress  && req.body.amount  && req.body.providerType){
+        
+        let Web3Client = await helper.getWebClient(req.body.providerType)
         const isvalid = await Web3Client.utils.isAddress(req.body.receiverAddress);
         if (!isvalid){
             
             res.status(400).json({ error: `This wallet address is not valid. Kindly confirm the address and try again.` });
         }else{
 
-            let fee = await  helper.estimateGasForEthTransaction(req.body.walletAddress, req.body.receiverAddress, req.body.amount);
+            let fee = await  helper.estimateGasForEthTransaction(req.body.walletAddress, req.body.receiverAddress, req.body.amount, Web3Client);
             res.status(fee.status).send(fee);
         } 
     }else{
@@ -216,8 +233,9 @@ router.post('/calculateGassFeeCoin', async(req, res) => {
 
 
 router.post('/getCoinBalance', async(req, res)=> {
-    if(req.body.walletAddress){
+    if(req.body.walletAddress && req.body.providerType){
 
+        let Web3Client = await helper.getWebClient(req.body.providerType)
         const ethBalance = await Web3Client.eth.getBalance(req.body.walletAddress)
         console.log(ethBalance)
         // convert amount to ether from wei
@@ -235,13 +253,13 @@ router.post('/getCoinBalance', async(req, res)=> {
 })
 
 
-//pancakeswap  
+//pancakeswap 
 router.post('/coinToTokenPrice', async(req, res) => {
-    if(req.body.amount && req.body.toSymbol){
+    if(req.body.amount && req.body.toSymbol && req.body.providerType){
         let etherAmount  = parseFloat(req.body.amount) 
         let toSymbol = req.body.toSymbol
        
-        let contractAddress = await helper.getContractAddress(toSymbol)
+        let contractAddress = await helper.getContractAddress(toSymbol, req.body.providerType)
         if(contractAddress){
             try{
                 var tradeAmount = ethers.utils.parseEther(String(etherAmount));
@@ -310,14 +328,14 @@ router.post('/coinToTokenPrice', async(req, res) => {
 
 
 router.post('/coinToTokenSwap', async(req, res) => {
-if(req.body.privateKey && req.body.toSymbol && req.body.amount && req.body.walletAddress){
+    if(req.body.privateKey && req.body.toSymbol && req.body.amount && req.body.walletAddress && req.body.providerType){
         
         let privateKey     =    req.body.privateKey 
         let toSymbol       =    req.body.toSymbol
         let etherAmount    =    req.body.amount
         let walletAddress  =    req.body.walletAddress
 
-        let contractAddress = await helper.getContractAddress(toSymbol)
+        let contractAddress = await helper.getContractAddress(toSymbol, req.body.providerType)
         if(contractAddress){
             var tradeAmount = ethers.utils.parseEther(String(etherAmount));
             const chainId = ChainId.MAINNET
@@ -393,12 +411,12 @@ if(req.body.privateKey && req.body.toSymbol && req.body.amount && req.body.walle
 
 
 router.post('/tokenToTokenPrice', async(req, res) => {
-    if(req.body.amount && req.body.toSymbol && req.body.symbol){
+    if(req.body.amount && req.body.toSymbol && req.body.symbol && req.body.providerType){
         let etherAmount  =  parseFloat(req.body.amount) 
         let toSymbol     =  req.body.toSymbol
         let fromSymbol   =  req.body.symbol
        
-        let contractAddress     = await helper.getContractAddress(toSymbol)
+        let contractAddress     = await helper.getContractAddress(toSymbol, req.body.providerType)
         let fromcontractAddress = await helper.getContractAddress(fromSymbol)
         if(contractAddress && fromcontractAddress){
             try{
@@ -468,15 +486,15 @@ router.post('/tokenToTokenPrice', async(req, res) => {
 
 
 router.post('/tokenToTokenSwap', async(req, res) => {
-    if(req.body.privateKey && req.body.toSymbol && req.body.symbol && req.body.amount && req.body.walletAddress){
+    if(req.body.privateKey && req.body.toSymbol && req.body.symbol && req.body.amount && req.body.walletAddress && req.body.providerType){
         let privateKey     =    req.body.privateKey 
         let toSymbol       =    req.body.toSymbol
         let etherAmount    =    req.body.amount
         let walletAddress  =    req.body.walletAddress
         let fromSymbol     =    req.body.symbol
 
-        let contractAddress     = await helper.getContractAddress(toSymbol)
-        let fromContractAddress = await helper.getContractAddress(fromSymbol)
+        let contractAddress     = await helper.getContractAddress(toSymbol, req.body.providerType)
+        let fromContractAddress = await helper.getContractAddress(fromSymbol, req.body.providerType)
         if(contractAddress && fromContractAddress){
             var tradeAmount = ethers.utils.parseEther(String(etherAmount));
             const chainId = ChainId.MAINNET
@@ -554,11 +572,11 @@ router.post('/tokenToTokenSwap', async(req, res) => {
 
 
 router.post('/tokenToCoinPrice', async(req, res) => {
-    if(req.body.amount && req.body.fromSymbol){
+    if(req.body.amount && req.body.fromSymbol && req.body.providerType){
         let etherAmount  =  parseFloat(req.body.amount) 
         let fromSymbol   =  req.body.fromSymbol
        
-        let contractAddress = await helper.getContractAddress(fromSymbol)
+        let contractAddress = await helper.getContractAddress(fromSymbol, req.body.providerType)
        
         if(contractAddress){
             try{
@@ -625,13 +643,13 @@ router.post('/tokenToCoinPrice', async(req, res) => {
 
 
 router.post('/tokenToCoinSwap', async(req, res) => {
-    if(req.body.privateKey && req.body.fromSymbol && req.body.amount && req.body.walletAddress){
+    if(req.body.privateKey && req.body.fromSymbol && req.body.amount && req.body.walletAddress && req.body.providerType){
         let privateKey     =    req.body.privateKey 
         let etherAmount    =    req.body.amount
         let walletAddress  =    req.body.walletAddress
         let fromSymbol     =    req.body.fromSymbol
 
-        let contractAddress     = await helper.getContractAddress(fromSymbol)
+        let contractAddress     = await helper.getContractAddress(fromSymbol,req.body.providerType)
         if(contractAddress){
             var tradeAmount = ethers.utils.parseEther(String(etherAmount));
             const chainId = ChainId.MAINNET
@@ -698,6 +716,83 @@ router.post('/tokenToCoinSwap', async(req, res) => {
             }
             res.status(404).send(response);
         }
+    }else{
+        let response = {
+            message  : 'Payload Missing'
+        }
+        res.status(404).send(response);
+    }
+})
+
+
+router.get('/wallet', async(req, res) => {
+    helper.createBTCWallet()
+    helper.walletNew()
+})
+
+
+
+//BTC trasections
+router.post('/estimateBTCTransactionFee', async(req, res) => {
+    if( req.body.fromAddress && req.body.toAddress && req.body.amount ){
+
+        let status = await helper.validateBitcoinAddress(req.body.toAddress)
+        if(status == 200){
+
+            let data=  await helper.estimateFeeForBTCTransaction(req.body.fromAddress, req.body.toAddress, req.body.amount);
+            res.status(data.status).send(data)
+        }else{
+            let response = {
+                message  : 'wallet address is not valid'
+            }
+            res.status(404).send(response);
+        }
+    }else{
+        let response = {
+            message  : 'Payload Missing'
+        }
+        res.status(404).send(response);
+    }
+})
+
+
+router.post('/sendBtcTrasection', async (req, res) => {
+
+    if(req.body.fromAddress && req.body.toAddress && req.body.amount && req.body.privateKey){ 
+        let fromAddress =   req.body.fromAddress 
+        let toAddress   =   req.body.toAddress 
+        let amount      =   parseFloat(req.body.amount) 
+        let privatekey  =   req.body.privateKey 
+        
+        let data = await helper.sendBTCTrasection(privatekey, amount, fromAddress, toAddress);
+        res.status(data.status).send(data);
+    }else{
+        let response = {
+            message  : 'Payload Missing'
+        }
+        res.status(404).send(response);
+    }
+})
+
+
+router.post('/BTCBalance', async(req, res) => {
+    if(req.body.walletAddress && req.body.symbol){
+        let walletAddress =  req.body.walletAddress;
+        let symbol        =  req.body.symbol;
+
+
+        
+
+
+
+        let responce      =  await helper.getBalance(walletAddress);
+        const btcInDollar =  await helper.getCryptoInUsd(symbol);
+        if((responce.btcBal) > 0  && btcInDollar > 0){
+
+            let balanceInDollar      = responce.btcBal * btcInDollar
+            responce.balanceInDollar = balanceInDollar
+        }
+        res.status(responce.status).send(responce)
     }else{
         let response = {
             message  : 'Payload Missing'
