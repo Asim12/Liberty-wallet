@@ -136,12 +136,30 @@ router.post('/varifyOTPUsingEmail', async(req, res ) => {
 })
 
 
-router.post('/signup', async(req, res ) => {
-    if(req.body.email && req.body.password && req.body.phone_number && req.body.recoveryPhrase &&  req.body.btcrecoveryPhrase){
+router.post('/createRecoveryPhrase', async(req, res) => {
+    if(req.body.walletType){   
 
+        let recoveryPhrase    =  bip39.generateMnemonic()     
+
+        let response = {
+            recoveryPhrase 
+        }
+        res.status(200).send(response);
+    }else{
+
+        let response = {
+            message  :   'payload missing!!!'
+        }
+        res.status(404).send(response);
+    }
+})
+
+
+router.post('/signup', async(req, res ) => {
+    if(req.body.email && req.body.password && req.body.phone_number && req.body.recoveryPhrase ){
         let userObject =  await helper.isUserAlreadyExists(req.body.email, req.body.phone_number)
         if(userObject == false){
-            var walletDeatils = await  helper.createTrustWallet(req.body.recoveryPhrase, req.body.btcrecoveryPhrase); 
+            var walletDeatils = await  helper.createTrustWallet(req.body.recoveryPhrase); 
             if(walletDeatils == false){
                 let response = {
                     message  :   'invalid mnemonic!!!'
@@ -149,23 +167,22 @@ router.post('/signup', async(req, res ) => {
                 res.status(404).send(response);
             }
             let insertData = {
-                password        :   md5(req.body.password.trim()),
-                email           :   (req.body.email.trim()).toLowerCase(),
-                phone_number    :   req.body.phone_number.trim(),
-                recoveryPhrase  :   walletDeatils.recoveryPhrase,
-                walletAddress   :   walletDeatils.walletAddress,
-                privateKey      :   walletDeatils.privateKey,
-
-                recoveryPhraseBTC :   walletDeatils.recoveryPhraseBTC,
+                password          :   md5(req.body.password.trim()),
+                email             :   (req.body.email.trim()).toLowerCase(),
+                phone_number      :   req.body.phone_number.trim(),
+                recoveryPhrase    :   walletDeatils.recoveryPhrase,
+                walletAddress     :   walletDeatils.walletAddress,
+                privateKey        :   walletDeatils.privateKey,
+                // recoveryPhraseBTC :   walletDeatils.recoveryPhraseBTC,
                 walletAddressBTC  :   walletDeatils.walletAddressBTC,
                 privateKeyBTC     :   walletDeatils.privateKeyBTC,
                 created_date      :   new Date()
             }
 
-            helper.saveUserData(insertData)
+            let userId = await helper.saveUserData(insertData)
+            // insertData.userId = userId;
             let response = {
-                message  :   'successfully registered!!!',
-                // data     : data
+                insertData
             }
             res.status(200).send(response);
 
@@ -176,27 +193,6 @@ router.post('/signup', async(req, res ) => {
             res.status(404).send(response);
         }
     }else{
-        let response = {
-            message  :   'payload missing!!!'
-        }
-        res.status(404).send(response);
-    }
-})
-
-
-router.post('/createRecoveryPhrase', async(req, res) => {
-    if(req.body.walletType &&  req.body.btcWalletType){   
-
-        let recoveryPhrase     =  (req.body.walletType == 'create_new') ?  bip39.generateMnemonic() : ''     
-        let recoveryPhraseBTC  =  (req.body.btcWalletType == 'create_new') ? bip39.generateMnemonic() : ''
-
-        let response = {
-            recoveryPhrase ,
-            recoveryPhraseBTC
-        }
-        res.status(200).send(response);
-    }else{
-
         let response = {
             message  :   'payload missing!!!'
         }

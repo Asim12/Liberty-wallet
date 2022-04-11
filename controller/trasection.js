@@ -19,6 +19,7 @@ const provider          =   new JsonRpcProvider('https://bsc-dataseed1.binance.o
 const abi               =   require('../Router2abi.json')
 const pancakeSwapRouter2Address  = '0x05fF2B0DB69458A0750badebc4f9e13aDd608C7F'; //mainnet address
 
+
 router.post('/calculateGassLimit', async (req, res) => {
     if(req.body.walletAddress && req.body.numTokens && req.body.symbol  && req.body.receiverAddress && req.body.providerType){
         let contractAddress = await helper.getContractAddress(req.body.symbol, req.body.providerType)
@@ -101,14 +102,15 @@ router.post('/getBalance', async(req, res) => {
         let contractAddress = await helper.getContractAddress(req.body.symbol, req.body.providerType)
         if(contractAddress.length > 0){
             let Web3Client = await helper.getWebClient(req.body.providerType)
+            if(Web3Client == false){
+                res.status(404).send({message : 'Provider type are invalid!!'});
+            }
             let balance = await helper.getWalletAddressBalance(req.body.walletAddress, contractAddress, Web3Client)
-
             let response = {
                 balance  :   balance
             }
             res.status(200).send(response);
         }else{
-
             let response = {
                 message  :   'Payload missing!!!!!!'
             }
@@ -124,24 +126,50 @@ router.post('/getBalance', async(req, res) => {
 })
  
 
-router.post('/addNewToken', async (req, res) => {
-    if(req.body.symbol && req.body.contractAddress  && req.body.providerType){
-
+router.post('/addNewToken', async (req, res) => {    
+    if(req.body.symbol && req.body.providerType && req.body.type){
         let Web3Client  =  await helper.getWebClient(req.body.providerType)
         let contract    =  await helper.getContractAddressInstanse(req.body.contractAddress, Web3Client)
+        console.log('asimmmmmmmmmmmmmmmm')
         let checkStatus =  await helper.isContractAddressIsValid(req.body.symbol, contract);
+        if(req.body.type == 'token' && checkStatus.status == 200){ 
+            
+            console.log('ooooooooooooooooo')
+            console.log('aaaaaaaaaaaaaaaaaaaaaaaaaaa', checkStatus)
+            helper.addContractAddress(req.body.symbol, req.body.contractAddress, req.body.providerType,  req.body.type);
+            res.status(checkStatus.status).send(checkStatus); 
+        }else if(checkStatus.status == 200){
 
-        console.log('checkStatus', checkStatus)
-       
-        helper.addContractAddress(req.body.symbol, req.body.contractAddress, req.body.providerType);
-        res.status(checkStatus.status).send(checkStatus);
+            helper.addCoin(req.body.symbol, req.body.contractAddress, req.body.providerType,  'coin');
+            res.status(200).send({ message : 'Added', status : 200 });
+        }else{
+
+            res.status(checkStatus.status).send(checkStatus);
+        }
     }else{
-
         let response = {
             message  :   'Payload missing!!!'
         }
         res.status(404).send(response);
     }
+})
+
+
+
+router.get('/getUserToken', async(req, res) => {
+    // if(req.body.user_id){
+
+    let data = await helper.getRecord()
+    let response = {
+        data   
+    }
+    res.status(200).send(response);
+    // }else{
+    //     let response = {
+    //         message  :   'payload missing!!!'
+    //     }
+    //     res.status(404).send(response);
+    // }
 })
 
 
@@ -253,6 +281,7 @@ router.post('/getCoinBalance', async(req, res)=> {
 })
 
 
+
 //pancakeswap 
 router.post('/coinToTokenPrice', async(req, res) => {
     if(req.body.amount && req.body.toSymbol && req.body.providerType){
@@ -279,8 +308,9 @@ router.post('/coinToTokenPrice', async(req, res) => {
                         18
                     )
                 )));
-            
                 const pair = await Fetcher.fetchPairData(WBNB, BUSD, provider)
+                console.log('asssssssssssssss')
+
                 const route = await new Route([pair], WBNB)
                 const trade = await new Trade(route, new TokenAmount(WBNB, tradeAmount), TradeType.EXACT_INPUT)
                 console.log('------ppppppppppppppp')
@@ -725,11 +755,89 @@ router.post('/tokenToCoinSwap', async(req, res) => {
 })
 
 
-router.get('/wallet', async(req, res) => {
-    helper.createBTCWallet()
-    helper.walletNew()
-})
+//combine api for swapping token_to_coin and coin_to_token
+router.post('/Swapping', async(req, res) => {
+    if(req.body.privateKey && req.body.symbol && req.body.amount && req.body.walletAddress && req.body.providerType && req.body.swapType){
+        
+        let privateKey     =    req.body.privateKey 
+        let toSymbol       =    req.body.symbol
+        let etherAmount    =    req.body.amount
+        let walletAddress  =    req.body.walletAddress
+        let swapType       =    req.body.swapType
 
+        let contractAddress = await helper.getContractAddress(toSymbol, req.body.providerType)
+        if(contractAddress){
+            var tradeAmount = ethers.utils.parseEther(String(etherAmount));
+            const chainId = ChainId.MAINNET
+            const weth = WETH[chainId];
+            
+            const addresses = {
+                WBNB:  (swapType == 'coin_to_token') ?  weth.address : contractAddress,//weth.address,
+                BUSD:  (swapType == 'coin_to_token') ? contractAddress : weth.address,//contractAddress,
+                PANCAKE_ROUTER: pancakeSwapRouter2Address   //pancakeswap router 2 mainnet
+            }
+            const [WBNB, BUSD] = await Promise.all(
+                [addresses.WBNB, addresses.BUSD].map(tokenAddress => (
+                new Token(
+                    ChainId.MAINNET,
+                    tokenAddress,
+                    18
+                )
+            )));
+            const pair = await Fetcher.fetchPairData(WBNB, BUSD, provider)
+
+            const route = await new Route([pair], WBNB)
+            const trade = await new Trade(route, new TokenAmount(WBNB, tradeAmount), TradeType.EXACT_INPUT)
+
+            const tokenPriceInEth = route.midPrice.invert().toSignificant(6);
+            const tokenPrice = route.midPrice.toSignificant(6);
+            // set Tolerance 0.5%
+            const slippageTolerance = new Percent('50', "10000"); //10 bips 1 bip = 0.001%
+            const amountOutMin = trade.minimumAmountOut(slippageTolerance).raw;
+            //set path of token and ether
+            const path = [addresses.WBNB, addresses.BUSD];
+            const to = walletAddress;
+            const deadline = Math.floor(Date.now() / 1000) + 60 * 20;
+            const value = trade.inputAmount.raw;
+        
+            const singer = new ethers.Wallet(privateKey);
+        
+            const account = singer.connect(provider);
+            const PANCAKE_ROUTER = new ethers.Contract(pancakeSwapRouter2Address, abi, account);
+            try {
+                const tx = await PANCAKE_ROUTER.swapExactETHForTokens(
+                    String(amountOutMin),
+                    path,
+                    to,
+                    deadline,
+                    { value: String(value), gasPrice: 20e9 }
+                );
+
+                const receipt = await tx.wait();
+                console.log(`Tx-hash: ${tx.hash}`)
+                console.log(`Tx was mined in block: ${receipt.blockNumber}`)
+
+                let response = {
+                    hash         : tx.hash,
+                    blockNumber  : receipt.blockNumber
+                }
+                return res.status(200).json(response);
+            } catch (error) {
+                return res.status(400).json({ error: error.reason });
+            }
+        }else{
+            let response = {
+                message  : 'Contract Address not exists!!!'
+            }
+            res.status(404).send(response);
+        }
+    }else{
+        let response = {
+            message  : 'Payload Missing'
+        }
+        res.status(404).send(response);
+    }
+})
 
 
 //BTC trasections
@@ -779,12 +887,6 @@ router.post('/BTCBalance', async(req, res) => {
     if(req.body.walletAddress && req.body.symbol){
         let walletAddress =  req.body.walletAddress;
         let symbol        =  req.body.symbol;
-
-
-        
-
-
-
         let responce      =  await helper.getBalance(walletAddress);
         const btcInDollar =  await helper.getCryptoInUsd(symbol);
         if((responce.btcBal) > 0  && btcInDollar > 0){

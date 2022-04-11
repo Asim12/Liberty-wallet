@@ -11,6 +11,13 @@ const accountSid = 'AC446be32ee53c385a5123c0e54e528894'
 const authToken  = '2ca5c750279349adfc7dec1250cbf17c';   
 const client     = require('twilio')(accountSid, authToken);
 
+const { ECPairFactory } = require('ecpair');
+const ecc = require('tiny-secp256k1')
+const ECPair = ECPairFactory(ecc);
+const axios = require('axios');
+const hdkey = require('hdkey');
+const bitcoin = require('bitcoinjs-lib')
+
 var USDTABI = [
     {
         "inputs": [],
@@ -240,12 +247,29 @@ var USDTABI = [
         "type": "function"
     }
 ];
-
+const satoshi = 100000000; 
 const Web3   =  require('web3');
 const { resolve } = require("dns");
+const { Console } = require("console");
 // const Web3Client = new Web3('https://speedy-nodes-nyc.moralis.io/1a2b3c4d5e6f1a2b3c4d5e6f/bsc/mainnet');
 // const Web3Client = new Web3('https://speedy-nodes-nyc.moralis.io/defd019df2c0685181b50e9a/bsc/testnet')
-
+/**
+ * 
+ * My address 
+ * {
+  private: '9c8f30701655f9afdc7f420776a113996b4fd7d6e4bce10d6623d8069bb25585',
+  public: '029ba27a8d118be18a4ceb57ccfd9a555ff6c23b7c0a9784818b1d942de33a3676',
+  address: 'BuymfX3aLJgQbQhtYQkeFUYXHenAsVCRXW',
+  wif: '0000'
+}
+ * 
+ * Recevier Address{
+  private: 'c1fa48b5ae27a94467fc75334dc46fdd7c12b69812ceb89933dbdb0d4506aea2',
+  public: '03b024ea362bfe31870682905d3186dae6a756fb1525c439ab54df3c4b9da9fad7',
+  address: 'CBrQMF7XYSCeww9yQD5Jz7ysngMn92aDad',
+  wif: 'Buq6dztFxRvSvtDTUkRqkBFXgGbtP2HNVEmB99dbzwRXbJPjjZu6'
+}
+**/
 module.exports = {
     varifyCredentials : (email, password) => {
         return new Promise(resolve => {
@@ -349,8 +373,9 @@ module.exports = {
     saveUserData : (insertData) => {
         return new Promise(resolve => {
             conn.then(async(db) => {
-                db.collection('users').insertOne(insertData)
-                resolve(true);
+                let user = await db.collection('users').insertOne(insertData)
+
+                resolve((user.insertedId).toString());
             })
         })
     },
@@ -458,10 +483,10 @@ module.exports = {
         });
     },
 
-    createTrustWallet : (recoveryPhrase, recoveryPhraseBTC) => {
+
+    createTrustWallet : (recoveryPhrase) => {
         return new Promise(async(resolve) => {
             try{
-
                 //bitcoin wallet Create
                 //Define the network
                 // const network = bitcoin.networks.bitcoin //mainnet
@@ -471,7 +496,7 @@ module.exports = {
                 // const path = `m/49'/0'/0'/0` // mainnet
                 const path = `m/49'/1'/0'/0` // testnet
 
-                const seed = await bip39.mnemonicToSeed(recoveryPhraseBTC); //creates seed buffer
+                const seed = await bip39.mnemonicToSeed(recoveryPhrase); //creates seed buffer
                 const root = hdkey.fromMasterSeed(seed)
                 const BTCPrivateKey = root.privateKey.toString('hex');
                 
@@ -482,18 +507,18 @@ module.exports = {
                 let btcWalletAddress = {
                     BTCPrivateKey,
                     walletAddressBTC : BTCwalletAddress.address,
-                    recoveryPhraseBTC
                 }
                 console.log('btcWalletAddress: ', btcWalletAddress);
 
                 const accountDetail = await ethers.Wallet.fromMnemonic(recoveryPhrase);
 
                 var address        =  crypto.createCipher('aes-128-cbc', 'bcqr199logic');
-                var walletAddress  =  address.update(accountDetail.address, 'utf8', 'hex')
+                var walletAddress  =  address.update(accountDetail.address, 'utf8', 'hex')  
                 walletAddress += address.final('hex');
     
                 var key         =  crypto.createCipher('aes-128-cbc', 'bcqr199logic');
                 var privateKey  =  key.update(accountDetail.privateKey, 'utf8', 'hex')
+                privateKey += key.final('hex');
 
 
                 var addressBTC        =  crypto.createCipher('aes-128-cbc', 'bcqr199logic');
@@ -504,12 +529,10 @@ module.exports = {
                 var privateKeyBTC  =  key.update(BTCPrivateKey, 'utf8', 'hex')
 
             
-                privateKey += key.final('hex');
                 let accountDetails = {
                     recoveryPhrase  :  recoveryPhrase,
                     walletAddress   :  walletAddress,
                     privateKey      :  privateKey,
-                    recoveryPhraseBTC  :  recoveryPhraseBTC,
                     walletAddressBTC   :  walletAddressBTC,
                     privateKeyBTC      :  privateKeyBTC,
                 }
@@ -561,6 +584,7 @@ module.exports = {
         })
     },
 
+
     calculateGassLimit : (senderWalletAddress, nonce, contractAddress, data, Web3Client) => {
         return new Promise(async(resolve) => {
 
@@ -590,6 +614,7 @@ module.exports = {
             resolve(gassEstimatePrice);
         })
     }, 
+
 
     countNonceAndData : ( walletAddress, numTokens, receiverAddress, contract, Web3Client) => {
         return new Promise(async(resolve) => {
@@ -629,70 +654,7 @@ module.exports = {
         })
     },
 
-    //old
-    transferTokenToOtherWallet : (walletAddress, receiverAddress, numTokens, senderPrivateKey, contractAddress) => {
-        return new Promise(async(resolve) => {    
-            try {
-                let contract = new Web3Client.eth.Contract(
-                    USDTABI, //abi
-                    contractAddress //contract address
-                );
-                //convert token to wei
-                let convertedNumTokens = Web3Client.utils.toWei(numTokens.toString());
-                // // make data for transfer
-                const data = contract.methods.transfer(receiverAddress, convertedNumTokens).encodeABI();
-                //make raw transaction 
-
-
-                // Determine the nonce
-                const count = await Web3Client.eth.getTransactionCount(walletAddress)
-                // How many tokens do I have before sending?
-                const nonce = Web3Client.utils.toHex(count);
-                console.log("🚀 ~ file: ether.controller.js ~ line 91 ~ makeRawTransaction ~ nonce", nonce)
-
-                var gaseLimit = await Web3Client.eth.estimateGas({
-                    "from" : walletAddress,
-                    "nonce": nonce,
-                    "to"   : contractAddress,
-                    "data" : data
-                });
-                console.log("🚀 ~ file: ether.controller.js ~ line 93 ~ makeRawTransaction ~ gaseLimit", gaseLimit)
-                const gasLimit = Web3Client.utils.toHex(gaseLimit);
-                const gasPrice = Web3Client.utils.toHex(Web3Client.eth.gasPrice || Web3Client.utils.toHex(2 * 1e9));
-                const value    = Web3Client.utils.toHex(Web3Client.utils.toWei('0', 'wei'));
-
-                // Chain ID of Ropsten Test Net is 97, replace it to 56 for Main Net
-                // var chainId = 97;
-                var chainId = 56;
-                var rawTransaction = {
-                    "from": walletAddress,
-                    "nonce": nonce,
-                    "gasPrice": gasPrice,
-                    "gasLimit": gasLimit,
-                    "to": contractAddress,
-                    "value": value,
-                    "data": data,
-                    "chainId": chainId
-                };
-                const signedTx = await Web3Client.eth.accounts.signTransaction(rawTransaction, senderPrivateKey);
-                let cehck = await Web3Client.eth.sendSignedTransaction(signedTx.rawTransaction);
-                console.log('rawTransaction==>> ', rawTransaction)
-                console.log('cehck==>> ', cehck)
-                console.log('cehck==>> ', cehck)
-                let reponseObject = {
-                    transactionHash: signedTx.transactionHash,
-                    details : signedTx
-                }
-                console.log('reponseObject', reponseObject)
-                resolve(reponseObject)
-            } catch (error) {
-                console.log("🚀 ~ file: ether.controller.js ~ line 79 ~ transferTokenToOtherWal ~ error", error)
-                resolve({message : error})
-            }
-        })
-    },
-
-
+    
     //new 
     transferTokenToOtherWallets : (gaseLimit, data, walletAddress, nonce, senderPrivateKey, contractAddress, Web3Client) => {
         return new Promise(async(resolve) => {    
@@ -736,7 +698,6 @@ module.exports = {
         return new Promise (resolve => {
             conn.then(async(db) => {
                 let data = await db.collection('contract_address').findOne({symbol : symbol, providerType : providerType })
-                console.log('data  ====>>>>>>>> ', data)
                 if(data){
                     resolve(data.contract_address)
                 }else{
@@ -747,11 +708,12 @@ module.exports = {
     },
 
 
-    addContractAddress : (symbol, contractAddress, providerType) => {
+    addContractAddress : (symbol, contractAddress, providerType, type) => {
         return new Promise(resolve => {
             conn.then(async(db) => {
                 let insertObject = {
                     contract_address : contractAddress,
+                    type             : type,
                     created_date     : new Date()
                 }
                 db.collection('contract_address').updateOne({ symbol : symbol, providerType: providerType}, {$set : insertObject}, {upsert: true})
@@ -760,6 +722,21 @@ module.exports = {
             })
         })
     },
+
+
+    addCoin : (symbol, providerType, type) => {
+        return new Promise(resolve => {
+            conn.then(async(db) => {
+                let insertObject = {
+                    type             : type,
+                    created_date     : new Date()
+                }
+                db.collection('contract_address').updateOne({ symbol : symbol, providerType: providerType}, {$set : insertObject}, {upsert: true})
+                resolve(true);
+            })
+        })
+    },
+
 
 
     isContractAddressIsValid : (symbol, contract) => {
@@ -846,10 +823,10 @@ module.exports = {
         }) 
     },
 
-    getRecord : (userId) => {
+    getRecord : () => {
         return new Promise((resolve, reject) => {
             conn.then(async(db) => {
-                let data = await db.collection('user_token').find({userId : userId}).toArray()
+                let data = await db.collection('user_token').find({}).toArray()
                 resolve(data)
             })
         }) 
@@ -862,10 +839,9 @@ module.exports = {
                 provider = 'https://rinkeby.infura.io/v3/2b1eac7434014a04b279e24da8abc275'
             }else if(providerType == "BNB"){
                 provider = 'https://speedy-nodes-nyc.moralis.io/defd019df2c0685181b50e9a/bsc/testnet'
-            }else if(providerType == "BTC"){
-                provider = ''
             }else{
 
+                resolve(false)
                 console.log('Wrrong provider type')
             }
             const Web3Client = new Web3(provider)
@@ -874,93 +850,11 @@ module.exports = {
     },
 
 
-    createBTCWallet : () => {
-        return new Promise(async(resolve) => {
-            const bip32 = require('bip32')
-            const bitcoin = require('bitcoinjs-lib')
-            //Define the network
-            const network = bitcoin.networks.bitcoin //mainnet
-            // const network = bitcoin.networks.testnet //testnet
-
-            // Derivation path
-            const path = `m/49'/0'/0'/0` // mainnet
-            // const path = `m/49'/1'/0'/0` // testnet
-
-            let mnemonic = 'finish reward kite mixture enjoy industry inform celery harbor sudden eternal tail'//bip39.generateMnemonic()
-            const seed = bip39.mnemonicToSeedSync(mnemonic)
-            let root = bip32.fromSeed(seed, network)
-
-            let account = root.derivePath(path)
-            let node = account.derive(0).derive(0)
-            // let btcAddress = bitcoin.payments.p2wpkh({
-            let btcAddress = bitcoin.payments.p2pkh({
-            pubkey: node.publicKey,
-            network: network,
-            }).address
-
-            console.log(`
-            Wallet generated:
-            - Address  : ${btcAddress},
-            - Key : ${node.toWIF()}, 
-            - Mnemonic : ${mnemonic} `)
-            
-        })
-    },
-
-
-    walletNew : () => {
-        
-        return new Promise(async(resolve) => {
-            
-
-            const { ECPairFactory } = require('ecpair');
-            const ecc = require('tiny-secp256k1')
-            const ECPair = ECPairFactory(ecc);
-            // const axios = require('axios');
-            const hdkey = require('hdkey');
-            const bip32 = require('bip32')
-            const bitcoin = require('bitcoinjs-lib')
-            //Define the network
-            const network = bitcoin.networks.bitcoin //mainnet
-            // const network = bitcoin.networks.testnet //testnet
-
-            // Derivation path
-            const path = `m/49'/0'/0'/0` // mainnet
-            // const path = `m/49'/1'/0'/0` // testnet
-
-            let mnemonic = 'finish reward kite mixture enjoy industry inform celery harbor sudden eternal tail'
-
-
-            const seed = await bip39.mnemonicToSeed(mnemonic); //creates seed buffer
-            const root = hdkey.fromMasterSeed(seed)
-            const masterPrivateKey = root.privateKey.toString('hex');
-            console.log('masterPrivateKey: ' + masterPrivateKey);
-
-            // var cipherPrivateKey = CryptoJS.AES.encrypt(masterPrivateKey, process.env.ENCRYPT_SECRET_KEY).toString();
-
-            const keyPair = await ECPair.fromPrivateKey(Buffer.from(masterPrivateKey, 'hex'))
-            const wif = keyPair.toWIF(Buffer.from(masterPrivateKey, 'hex'));
-            const { address } = bitcoin.payments.p2wpkh({ pubkey: keyPair.publicKey });
-        })      
-    },
-
-
-    validateBitcoinAddress:(toAddress) => {
-        return new Promise((resolve, reject) => {
-            axios.get(`https://api.blockcypher.com/v1/bcy/test/addrs/${toAddress}/balance?token=40fe436d313a412a9b94890d97cf0d84`).then((responce) => {
-                console.log(responce.status)
-                resolve(responce.status)
-
-            }).catch((err) => {
-                console.log( err.response.data.error)
-                resolve(err.response.status)
-            });
-        })
-    },
-
-
     estimateFeeForBTCTransaction : (fromAddress, toAddress, amount) => {
         return new Promise(async(resolve) => {
+
+            // const BLOCKCYPHER_URL= 'https://api.blockcypher.com/v1/bcy/test/'
+            // BLOCKCYPHER_TOKEN=40fe436d313a412a9b94890d97cf0d84
             const amountIn = Number(amount) * satoshi
             var newtx = {
                 inputs: [{ addresses: [fromAddress] }],
@@ -977,6 +871,20 @@ module.exports = {
                 console.log(error)
                 resolve({status:400, message : 'Something went Wrrong!!!', estimatedGasFee : false})
             }
+        })
+    },
+
+
+    validateBitcoinAddress:(toAddress) => {
+        return new Promise((resolve, reject) => {
+            axios.get(`https://api.blockcypher.com/v1/bcy/test/addrs/${toAddress}/balance?token=40fe436d313a412a9b94890d97cf0d84`).then((responce) => {
+                console.log(responce.status)
+                resolve(responce.status)
+
+            }).catch((err) => {
+                console.log( err.response.data.error)
+                resolve(err.response.status)
+            });
         })
     },
 
@@ -1049,5 +957,78 @@ module.exports = {
                 resolve(ex)
             }
         })
-    }
+    },
+
+
+    // const json = response.data.data[symbol].quote.USD.price;
+
+    // _coinList[symbol] = json;
+    // console.log("🚀 ~ file: walletHalper.js ~ line 107 ~ exports.getCryptoInUsdCoin= ~ _coinList", _coinList)
+    // return _coinList
+    
+        
+    //old method 
+    // createBTCWallet : () => {
+    //     return new Promise(async(resolve) => {
+    //         const bip32 = require('bip32')
+    //         const bitcoin = require('bitcoinjs-lib')
+    //         //Define the network
+    //         const network = bitcoin.networks.bitcoin //mainnet
+    //         // const network = bitcoin.networks.testnet //testnet
+
+    //         // Derivation path
+    //         const path = `m/49'/0'/0'/0` // mainnet
+    //         // const path = `m/49'/1'/0'/0` // testnet
+
+    //         let mnemonic = 'finish reward kite mixture enjoy industry inform celery harbor sudden eternal tail'//bip39.generateMnemonic()
+    //         const seed = bip39.mnemonicToSeedSync(mnemonic)
+    //         let root = bip32.fromSeed(seed, network)
+
+    //         let account = root.derivePath(path)
+    //         let node = account.derive(0).derive(0)
+    //         // let btcAddress = bitcoin.payments.p2wpkh({
+    //         let btcAddress = bitcoin.payments.p2pkh({
+    //         pubkey: node.publicKey,
+    //         network: network,
+    //         }).address
+
+    //         console.log(`
+    //         Wallet generated:
+    //         - Address  : ${btcAddress},
+    //         - Key : ${node.toWIF()}, 
+    //         - Mnemonic : ${mnemonic} `)
+            
+    //     })
+    // },
+
+    //new method
+    // walletNew : () => {
+        
+    //     return new Promise(async(resolve) => {
+            
+
+
+    //         //Define the network
+    //         const network = bitcoin.networks.bitcoin //mainnet
+    //         // const network = bitcoin.networks.testnet //testnet
+
+    //         // Derivation path
+    //         const path = `m/49'/0'/0'/0` // mainnet
+    //         // const path = `m/49'/1'/0'/0` // testnet
+
+    //         let mnemonic = 'finish reward kite mixture enjoy industry inform celery harbor sudden eternal tail'
+
+
+    //         const seed = await bip39.mnemonicToSeed(mnemonic); //creates seed buffer
+    //         const root = hdkey.fromMasterSeed(seed)
+    //         const masterPrivateKey = root.privateKey.toString('hex');
+    //         console.log('masterPrivateKey: ' + masterPrivateKey);
+
+    //         // var cipherPrivateKey = CryptoJS.AES.encrypt(masterPrivateKey, process.env.ENCRYPT_SECRET_KEY).toString();
+
+    //         const keyPair = await ECPair.fromPrivateKey(Buffer.from(masterPrivateKey, 'hex'))
+    //         const wif = keyPair.toWIF(Buffer.from(masterPrivateKey, 'hex'));
+    //         const { address } = bitcoin.payments.p2wpkh({ pubkey: keyPair.publicKey });
+    //     })      
+    // }
 }
